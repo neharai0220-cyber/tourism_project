@@ -12,7 +12,7 @@ st.write(
 )
 
 # --- Load model from HF Model Hub ---
-MODEL_REPO = "NehaRai22/Wellness_Tourism_Prediction/tourism_package_prediction_model" # Corrected to the model repo ID where the model was uploaded
+MODEL_REPO = "NehaRai22/tourism_package_prediction_model" # Corrected to the model repo ID where the model was uploaded
 MODEL_FILE = "best_tourism_ProdTaken_v1.joblib"  # ensure train.py uploads this exact name
 
 @st.cache_resource

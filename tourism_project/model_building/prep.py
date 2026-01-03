@@ -1,4 +1,3 @@
-# for data manipulation
 
 # for data manipulation
 import pandas as pd
