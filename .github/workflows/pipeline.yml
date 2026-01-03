@@ -1,59 +1,160 @@
+
 name: Tourism Project Pipeline
 
 on:
   push:
     branches:
-      - main  # Automatically triggers on push to the main branch
+      - main
+  workflow_dispatch: {}
 
 jobs:
-
   register-dataset:
+    name: Register dataset to Hugging Face
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tourism_project/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tourism_project/requirements.txt
+
+      - name: Verify repository contents
+        run: |
+          echo "Workspace: $GITHUB_WORKSPACE"
+          ls -la
+          ls -la tourism_project
+          ls -la tourism_project/model_building || true
+
       - name: Upload Dataset to Hugging Face Hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python model_building/data_register.py
+        run: |
+          python tourism_project/model_building/data_register.py
 
   data-prep:
+    name: Data preparation (split + upload artifacts)
+    runs-on: ubuntu-latest
     needs: register-dataset
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-      - name: Run Data Preparation
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python model_building/prep.py
 
-  model-traning:
-    needs: data-prep
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-      - name: Start MLflow Server
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tourism_project/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
         run: |
-          nohup mlflow ui --host 0.0.0.0 --port 5000 &
-          sleep 5
-      - name: Model Building
+          python -m pip install --upgrade pip
+          pip install -r tourism_project/requirements.txt
+
+      - name: Run data preparation
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python model_building/train.py
+        run: |
+          python tourism_project/model_building/prep.py
+
+  model-training:
+    name: Train & log model (MLflow)
+    runs-on: ubuntu-latest
+    needs: data-prep
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tourism_project/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tourism_project/requirements.txt
+
+      # NOTE: MLflow UI in Actions is usually not needed; it won't be publicly reachable.
+      # You can comment this step if you don't require a running UI during CI.
+      - name: Start MLflow server (optional)
+        run: |
+          nohup mlflow ui --host 127.0.0.1 --port 5000 >/dev/null 2>&1 &
+          sleep 5
+
+      - name: Train model
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python tourism_project/model_building/train.py
 
   deploy-hosting:
+    name: Push Streamlit files to Hugging Face Space (optional)
     runs-on: ubuntu-latest
-    needs: [model-traning,data-prep,register-dataset]
+    needs: [model-training, data-prep, register-dataset]
+    if: ${{ always() }}  # Change to "success()" if you want to deploy only on success
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-      - name: Push files to Frontend Hugging Face Space
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tourism_project/deployment/requirements.txt', 'tourism_project/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies for hosting
+        run: |
+          python -m pip install --upgrade pip
+          # Use deployment requirements if present, else fallback to main requirements
+          if [ -f tourism_project/deployment/requirements.txt ]; then
+            pip install -r tourism_project/deployment/requirements.txt
+          else
+            pip install -r tourism_project/requirements.txt
+          fi
+
+      - name: Push frontend to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python hosting/hosting.py
+        run: |
+          python tourism_project/hosting/hosting.py
